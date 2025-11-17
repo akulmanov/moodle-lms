@@ -51,3 +51,4 @@ function local_onboarding_extend_navigation_user(navigation_node $navigation, st
     );
 }
 
+

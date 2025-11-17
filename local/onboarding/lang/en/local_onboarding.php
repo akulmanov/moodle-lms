@@ -35,3 +35,4 @@ $string['restarttour'] = 'Start the onboarding tour again';
 $string['tourresetcomplete'] = 'The onboarding tour will start the next time you open your dashboard.';
 $string['tourmissing'] = 'The onboarding tour is currently unavailable.';
 
+
