@@ -55,6 +55,8 @@ $string['template_activity_intro'] = 'Activity intro template';
 $string['template_activity_intro_desc'] = 'Template for activity intro field';
 $string['template_assign_activityeditor'] = 'Assignment activity editor template';
 $string['template_assign_activityeditor_desc'] = 'Template for assignment activity instructions field';
+$string['template_page_content'] = 'Page content template';
+$string['template_page_content_desc'] = 'Template for page content field';
 
 // Module-specific templates.
 $string['module_templates'] = 'Module-specific templates';

@@ -152,6 +152,7 @@ function local_mlangdefaults_get_default_template($templatekey) {
         'activity_name' => 'Activity title',
         'activity_intro' => 'Activity description',
         'assign_activityeditor' => 'Activity instructions',
+        'page_content' => 'Page content',
     ];
 
     return $defaults[$templatekey] ?? '';
@@ -336,6 +337,12 @@ function local_mlangdefaults_get_all_hardcoded_mappings() {
                 'fieldselector' => 'id_activityeditor',
                 'fieldtype' => 'editor',
                 'templatekey' => 'assign_activityeditor',
+            ],
+            // Page-specific content field.
+            [
+                'fieldselector' => 'id_page',
+                'fieldtype' => 'editor',
+                'templatekey' => 'page_content',
             ],
         ],
     ];
@@ -711,6 +718,126 @@ function local_mlangdefaults_before_footer($hook = null) {
             return result;
         }
         
+        function injectIntoEditor(fieldselector, template, config) {
+            // Get the actual element ID (remove 'id_' prefix if present).
+            var elementId = fieldselector;
+            if (fieldselector.indexOf('id_') === 0) {
+                elementId = fieldselector.substring(3);
+            }
+            
+            var textarea = document.getElementById(fieldselector);
+            if (!textarea) {
+                return;
+            }
+            
+            // Check if textarea already has content.
+            if (textarea.value && textarea.value.trim() !== '') {
+                return;
+            }
+            
+            var injected = false;
+            
+            // Function to try injecting into TinyMCE.
+            function tryInjectTinyMCE() {
+                if (typeof tinyMCE === 'undefined') {
+                    return false;
+                }
+                
+                try {
+                    var editor = tinyMCE.get(elementId);
+                    if (editor) {
+                        // Check if editor is initialized - try multiple ways
+                        var isReady = false;
+                        if (editor.initialized !== undefined) {
+                            isReady = editor.initialized;
+                        } else if (editor.getContent) {
+                            // If getContent exists, try to use it to check readiness
+                            try {
+                                editor.getContent();
+                                isReady = true;
+                            } catch (e) {
+                                isReady = false;
+                            }
+                        }
+                        
+                        if (isReady) {
+                            var currentContent = editor.getContent();
+                            // Check if content is empty or just whitespace/empty tags
+                            if (!currentContent || currentContent.trim() === '' || currentContent.trim() === '<p></p>' || currentContent.trim() === '<p><br></p>') {
+                                editor.setContent(template);
+                                if (config.showtoast && typeof M !== 'undefined' && M.util && M.util.add_notification) {
+                                    M.util.add_notification(config.strings.insertedtemplate || 'Inserted multilingual template', {type: 'info'});
+                                }
+                                return true;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Silently handle TinyMCE access errors.
+                }
+                return false;
+            }
+            
+            // Function to try injecting into Atto.
+            function tryInjectAtto() {
+                if (typeof Y === 'undefined' || !Y.M || !Y.M.editor_atto) {
+                    return false;
+                }
+                
+                try {
+                    var editors = Y.M.editor_atto.get_editors();
+                    if (editors && editors[elementId]) {
+                        var editor = editors[elementId];
+                        var currentValue = editor.get('value');
+                        if (!currentValue || currentValue.trim() === '') {
+                            editor.set('value', template);
+                            if (config.showtoast && typeof M !== 'undefined' && M.util && M.util.add_notification) {
+                                M.util.add_notification(config.strings.insertedtemplate || 'Inserted multilingual template', {type: 'info'});
+                            }
+                            return true;
+                        }
+                    }
+                } catch (e) {
+                    // Silently handle Atto access errors.
+                }
+                return false;
+            }
+            
+            // Try immediate injection.
+            if (tryInjectTinyMCE() || tryInjectAtto()) {
+                return;
+            }
+            
+            // If editor not ready, wait and retry with polling.
+            var attempts = 0;
+            var maxAttempts = 30; // Try for up to 6 seconds (30 * 200ms).
+            var pollInterval = setInterval(function() {
+                attempts++;
+                
+                if (tryInjectTinyMCE() || tryInjectAtto()) {
+                    clearInterval(pollInterval);
+                    injected = true;
+                    return;
+                }
+                
+                if (attempts >= maxAttempts) {
+                    clearInterval(pollInterval);
+                    // Final fallback: set textarea value and trigger change.
+                    textarea.value = template;
+                    if (textarea.dispatchEvent) {
+                        textarea.dispatchEvent(new Event('change', {bubbles: true}));
+                    }
+                    // Try one more time to sync with editor if it became available.
+                    setTimeout(function() {
+                        tryInjectTinyMCE();
+                    }, 100);
+                    if (config.showtoast && typeof M !== 'undefined' && M.util && M.util.add_notification) {
+                        M.util.add_notification(config.strings.insertedtemplate || 'Inserted multilingual template', {type: 'info'});
+                    }
+                }
+            }, 200);
+        }
+        
         function injectDefaults() {
             var mappings = config.mappings || [];
             var currentUrl = window.location.href;
@@ -750,39 +877,27 @@ function local_mlangdefaults_before_footer($hook = null) {
                 }
                 
                 if (mapping.fieldtype === 'editor') {
-                    // Try TinyMCE
-                    if (typeof M !== 'undefined' && M.editor && M.editor[mapping.fieldselector]) {
-                        var editor = M.editor[mapping.fieldselector];
-                        if (editor && editor.getContent && editor.getContent() === '') {
-                            editor.setContent(template);
-                        }
-                    } else {
-                        // Fallback to textarea
-                        field.value = template;
-                        if (field.dispatchEvent) {
-                            field.dispatchEvent(new Event('change', {bubbles: true}));
-                        }
-                    }
+                    injectIntoEditor(mapping.fieldselector, template, config);
                 } else {
                     field.value = template;
                     if (field.dispatchEvent) {
                         field.dispatchEvent(new Event('change', {bubbles: true}));
                     }
-                }
-                
-                if (config.showtoast && typeof M !== 'undefined' && M.util && M.util.add_notification) {
-                    M.util.add_notification(config.strings.insertedtemplate || 'Inserted multilingual template', {type: 'info'});
+                    if (config.showtoast && typeof M !== 'undefined' && M.util && M.util.add_notification) {
+                        M.util.add_notification(config.strings.insertedtemplate || 'Inserted multilingual template', {type: 'info'});
+                    }
                 }
             }
         }
         
-        // Wait for page to be ready
+        // Wait for page to be ready and editors to initialize
+        // Use longer delay to ensure TinyMCE/Atto editors are fully initialized
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', function() {
-                setTimeout(injectDefaults, 1000);
+                setTimeout(injectDefaults, 1500);
             });
         } else {
-            setTimeout(injectDefaults, 1000);
+            setTimeout(injectDefaults, 1500);
         }
     })();
     ";

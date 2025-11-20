@@ -132,6 +132,16 @@ if ($hassiteconfig) {
                 'Activity instructions',
                 PARAM_TEXT));
         }
+        
+        // Page-specific content field.
+        if ($modname === 'page') {
+            $settings->add(new admin_setting_configtextarea(
+                'local_mlangdefaults/template_page_content',
+                get_string('template_page_content', 'local_mlangdefaults'),
+                get_string('template_page_content_desc', 'local_mlangdefaults'),
+                'Page content',
+                PARAM_TEXT));
+        }
     }
 }
 

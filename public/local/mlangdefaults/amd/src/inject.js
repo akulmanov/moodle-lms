@@ -233,15 +233,34 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
 
             try {
                 const editor = tinyMCE.get(elementId);
-                if (editor && editor.initialized) {
-                    const currentContent = editor.getContent();
-                    if (!currentContent || currentContent.trim() === '') {
-                        editor.setContent(template);
-                        if (config.showtoast) {
-                            showToast(config);
+                if (editor) {
+                    // Check if editor is initialized - try multiple ways
+                    let isReady = false;
+                    if (editor.initialized !== undefined) {
+                        isReady = editor.initialized;
+                    } else if (editor.getContent) {
+                        // If getContent exists, try to use it to check readiness
+                        try {
+                            editor.getContent();
+                            isReady = true;
+                        } catch (e) {
+                            isReady = false;
                         }
-                        logInjection(fieldselector, template);
-                        return true;
+                    }
+                    
+                    if (isReady) {
+                        const currentContent = editor.getContent();
+                        // Check if content is empty or just whitespace/empty tags
+                        if (!currentContent || currentContent.trim() === '' || 
+                            currentContent.trim() === '<p></p>' || 
+                            currentContent.trim() === '<p><br></p>') {
+                            editor.setContent(template);
+                            if (config.showtoast) {
+                                showToast(config);
+                            }
+                            logInjection(fieldselector, template);
+                            return true;
+                        }
                     }
                 }
             } catch (e) {
@@ -283,7 +302,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
 
         // If editor not ready, wait and retry with polling.
         let attempts = 0;
-        const maxAttempts = 20; // Try for up to 4 seconds (20 * 200ms).
+        const maxAttempts = 30; // Try for up to 6 seconds (30 * 200ms).
         const pollInterval = setInterval(function() {
             attempts++;
             
