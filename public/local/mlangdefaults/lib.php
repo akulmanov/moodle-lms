@@ -17,6 +17,32 @@
 defined('MOODLE_INTERNAL') || die();
 
 /**
+ * Get all installed activity modules.
+ *
+ * @return array Array of module name => display name
+ */
+function local_mlangdefaults_get_installed_modules() {
+    global $DB;
+    require_once(__DIR__ . '/../../lib/modinfolib.php');
+    
+    $modules = $DB->get_records('modules', ['visible' => 1], 'name ASC');
+    $result = [];
+    
+    foreach ($modules as $module) {
+        $modname = $module->name;
+        // Get display name.
+        if (get_string_manager()->string_exists('pluginname', 'mod_' . $modname)) {
+            $displayname = get_string('pluginname', 'mod_' . $modname);
+        } else {
+            $displayname = ucfirst($modname);
+        }
+        $result[$modname] = $displayname;
+    }
+    
+    return $result;
+}
+
+/**
  * Generate multi-language template from language list and template key.
  *
  * @param string $templatekey Template key (e.g., 'course_fullname')
@@ -88,11 +114,21 @@ function local_mlangdefaults_resolve_template($templatekey, $context = []) {
         }
     }
 
-    // Check module override.
+    // Check module-specific template (e.g., template_assign_name, template_quiz_intro).
     if (!empty($context['moduletype'])) {
-        $moduletemplate = get_config('local_mlangdefaults', 'template_' . $context['moduletype'] . '_' . $templatekey);
-        if (!empty($moduletemplate)) {
-            return $moduletemplate;
+        // For activity_name and activity_intro, check module-specific first (e.g., template_assign_name).
+        if ($templatekey === 'activity_name' || $templatekey === 'activity_intro') {
+            $moduletemplate = get_config('local_mlangdefaults', 'template_' . $context['moduletype'] . '_' . str_replace('activity_', '', $templatekey));
+            if (!empty($moduletemplate)) {
+                return $moduletemplate;
+            }
+        }
+        // For module-specific template keys (e.g., assign_activityeditor).
+        if (strpos($templatekey, $context['moduletype']) === 0) {
+            $moduletemplate = get_config('local_mlangdefaults', 'template_' . $templatekey);
+            if (!empty($moduletemplate)) {
+                return $moduletemplate;
+            }
         }
     }
 
@@ -115,6 +151,7 @@ function local_mlangdefaults_get_default_template($templatekey) {
         'section_summary' => 'Section description',
         'activity_name' => 'Activity title',
         'activity_intro' => 'Activity description',
+        'assign_activityeditor' => 'Activity instructions',
     ];
 
     return $defaults[$templatekey] ?? '';
@@ -228,29 +265,80 @@ function local_mlangdefaults_is_creation_page($url) {
 }
 
 /**
- * Get field mappings for a page.
+ * Get hardcoded field mappings for a page.
  *
  * @param string $pageurl Page URL
- * @return array Array of mapping objects
+ * @return array Array of mapping objects with fieldselector, fieldtype, templatekey
  */
 function local_mlangdefaults_get_mappings_for_page($pageurl) {
-    global $DB;
-
-    $mappings = $DB->get_records('local_mlangdefaults_mappings', ['enabled' => 1], 'priority DESC');
+    // Hardcoded mappings based on Moodle 5.1 structure.
+    $allmappings = local_mlangdefaults_get_all_hardcoded_mappings();
     $matched = [];
 
-    foreach ($mappings as $mapping) {
-        $pattern = $mapping->pagepattern;
-        // Convert simple pattern to regex if needed.
-        if (strpos($pattern, '/') === 0 && strpos($pattern, '^') !== 0) {
-            $pattern = '#' . $pattern . '#';
-        }
-        if (preg_match($pattern, $pageurl)) {
-            $matched[] = $mapping;
+    foreach ($allmappings as $pattern => $fields) {
+        if (preg_match('#' . $pattern . '#', $pageurl)) {
+            foreach ($fields as $field) {
+                $matched[] = (object)$field;
+            }
         }
     }
 
     return $matched;
+}
+
+/**
+ * Get all hardcoded field mappings.
+ *
+ * @return array Array of mappings keyed by page pattern
+ */
+function local_mlangdefaults_get_all_hardcoded_mappings() {
+    return [
+        // Course edit page.
+        '/course/edit\.php' => [
+            [
+                'fieldselector' => 'id_fullname',
+                'fieldtype' => 'text',
+                'templatekey' => 'course_fullname',
+            ],
+            [
+                'fieldselector' => 'id_summary_editor',
+                'fieldtype' => 'editor',
+                'templatekey' => 'course_summary',
+            ],
+        ],
+        // Section edit page.
+        '/course/editsection\.php' => [
+            [
+                'fieldselector' => 'id_name',
+                'fieldtype' => 'text',
+                'templatekey' => 'section_name',
+            ],
+            [
+                'fieldselector' => 'id_summary_editor',
+                'fieldtype' => 'editor',
+                'templatekey' => 'section_summary',
+            ],
+        ],
+        // Activity mod edit page - all activities have name and intro.
+        '/course/modedit\.php' => [
+            [
+                'fieldselector' => 'id_name',
+                'fieldtype' => 'text',
+                'templatekey' => 'activity_name',
+            ],
+            [
+                'fieldselector' => 'id_introeditor',
+                'fieldtype' => 'editor',
+                'templatekey' => 'activity_intro',
+            ],
+            // Assignment-specific field.
+            [
+                'fieldselector' => 'id_activityeditor',
+                'fieldtype' => 'editor',
+                'templatekey' => 'assign_activityeditor',
+            ],
+        ],
+    ];
 }
 
 /**
@@ -388,8 +476,13 @@ function local_mlangdefaults_course_edit_form_internal($formwrapper, $mform) {
             ];
         }
 
-        // Get templates for JavaScript.
-        $templatekeys = ['course_fullname', 'course_summary'];
+        // Get templates for JavaScript - collect unique template keys from mappings.
+        $templatekeys = [];
+        foreach ($mappings as $mapping) {
+            if (!empty($mapping->templatekey) && !in_array($mapping->templatekey, $templatekeys)) {
+                $templatekeys[] = $mapping->templatekey;
+            }
+        }
         foreach ($templatekeys as $key) {
             $template = local_mlangdefaults_resolve_template($key, $context);
             if (empty($template)) {
@@ -413,36 +506,95 @@ function local_mlangdefaults_course_edit_form_internal($formwrapper, $mform) {
 function local_mlangdefaults_before_footer($hook = null) {
     global $PAGE;
     
-    // Only run on course edit page
-    $url = $PAGE->url->out(false);
-    if (strpos($url, '/course/edit.php') === false) {
-        return;
-    }
-    
     // Check if plugin is enabled
     if (!get_config('local_mlangdefaults', 'enabled')) {
         return;
     }
     
-    // Check if this is a new course (no id parameter means new course)
-    $courseid = optional_param('id', 0, PARAM_INT);
-    if ($courseid > 0) {
-        $creationonly = get_config('local_mlangdefaults', 'creationonly');
-        if ($creationonly) {
-            return;
+    $url = $PAGE->url->out(false);
+    $urlpattern = '';
+    $context = [];
+    $moduletype = null;
+    
+    // Handle course edit page.
+    if (strpos($url, '/course/edit.php') !== false) {
+        $urlpattern = '/course/edit.php';
+        $courseid = optional_param('id', 0, PARAM_INT);
+        if ($courseid > 0) {
+            $creationonly = get_config('local_mlangdefaults', 'creationonly');
+            if ($creationonly) {
+                return;
+            }
+        }
+        if ($courseid > 0) {
+            $context['courseid'] = $courseid;
         }
     }
+    // Handle section edit page.
+    else if (strpos($url, '/course/editsection.php') !== false) {
+        $urlpattern = '/course/editsection.php';
+        $sectionid = optional_param('id', 0, PARAM_INT);
+        if ($sectionid > 0) {
+            $creationonly = get_config('local_mlangdefaults', 'creationonly');
+            if ($creationonly) {
+                return;
+            }
+        }
+    }
+    // Handle activity mod edit page.
+    else if (strpos($url, '/course/modedit.php') !== false) {
+        $urlpattern = '/course/modedit.php';
+        // Extract module type from URL (add=assign, add=quiz, etc.).
+        $moduletype = optional_param('add', '', PARAM_PLUGIN);
+        if (empty($moduletype)) {
+            // Try to get from update parameter.
+            $update = optional_param('update', 0, PARAM_INT);
+            if ($update > 0) {
+                global $DB;
+                $cm = $DB->get_record('course_modules', ['id' => $update]);
+                if ($cm) {
+                    $module = $DB->get_record('modules', ['id' => $cm->module]);
+                    if ($module) {
+                        $moduletype = $module->name;
+                    }
+                }
+            }
+        }
+        if ($moduletype) {
+            $context['moduletype'] = $moduletype;
+        }
+        $update = optional_param('update', 0, PARAM_INT);
+        if ($update > 0) {
+            $creationonly = get_config('local_mlangdefaults', 'creationonly');
+            if ($creationonly) {
+                return;
+            }
+        }
+    }
+    else {
+        return;
+    }
     
-    // Load JavaScript for course edit form
-    $urlpattern = '/course/edit.php';
+    // Get mappings for this page.
     $mappings = local_mlangdefaults_get_mappings_for_page($urlpattern);
     if (empty($mappings)) {
         return;
     }
     
-    $context = [];
-    if ($courseid > 0) {
-        $context['courseid'] = $courseid;
+    // Filter mappings based on module type for modedit pages.
+    if ($moduletype && $urlpattern === '/course/modedit.php') {
+        $filteredmappings = [];
+        foreach ($mappings as $mapping) {
+            // Include all standard mappings (name, intro).
+            if ($mapping->templatekey === 'activity_name' || $mapping->templatekey === 'activity_intro') {
+                $filteredmappings[] = $mapping;
+            }
+            // Include module-specific mappings (e.g., assign_activityeditor only for assign).
+            else if (strpos($mapping->templatekey, $moduletype) === 0) {
+                $filteredmappings[] = $mapping;
+            }
+        }
+        $mappings = $filteredmappings;
     }
     
     // Prepare JavaScript configuration
@@ -468,19 +620,49 @@ function local_mlangdefaults_before_footer($hook = null) {
         ];
     }
     
-    $templatekeys = ['course_fullname', 'course_summary'];
-    foreach ($templatekeys as $key) {
-        $template = local_mlangdefaults_resolve_template($key, $context);
-        if (empty($template)) {
-            $template = local_mlangdefaults_get_default_template($key);
+    // Get templates for JavaScript - collect unique template keys from mappings.
+    $templatekeys = [];
+    foreach ($mappings as $mapping) {
+        if (!empty($mapping->templatekey) && !in_array($mapping->templatekey, $templatekeys)) {
+            $templatekeys[] = $mapping->templatekey;
         }
+    }
+    
+    // For activity pages, also load module-specific templates.
+    if (!empty($context['moduletype'])) {
+        // Add module-specific name and intro templates.
+        $modnamekey = $context['moduletype'] . '_name';
+        $modintrokey = $context['moduletype'] . '_intro';
+        $templatekeys[] = $modnamekey;
+        $templatekeys[] = $modintrokey;
+    }
+    
+    foreach ($templatekeys as $key) {
+        // Resolve template - for module-specific keys, the resolve function will check module-specific config.
+        $resolvkey = $key;
+        if (!empty($context['moduletype']) && ($key === $context['moduletype'] . '_name' || $key === $context['moduletype'] . '_intro')) {
+            // Map to activity_name or activity_intro for resolution (resolve function checks module-specific).
+            $resolvkey = str_replace($context['moduletype'] . '_', 'activity_', $key);
+        }
+        $template = local_mlangdefaults_resolve_template($resolvkey, $context);
+        if (empty($template)) {
+            $template = local_mlangdefaults_get_default_template($resolvkey);
+        }
+        // Store with both keys so JavaScript can find it.
         $jsconfig['templates'][$key] = $template;
+        if ($resolvkey !== $key) {
+            $jsconfig['templates'][$resolvkey] = $template;
+        }
+    }
+    
+    // Pass module type to JavaScript for dynamic template resolution.
+    if (!empty($context['moduletype'])) {
+        $jsconfig['moduletype'] = $context['moduletype'];
     }
     
     // Load inline JavaScript (no AMD build required)
     $js = "
     (function() {
-        console.log('MLANGDEFAULTS: Inline script loaded');
         var config = " . json_encode($jsconfig) . ";
         window.M = window.M || {};
         window.M.cfg = window.M.cfg || {};
@@ -501,7 +683,17 @@ function local_mlangdefaults_before_footer($hook = null) {
         
         function getTemplate(templatekey, config) {
             if (!config || !config.templates) return '';
-            var template = config.templates[templatekey];
+            
+            // For activity_name and activity_intro, check for module-specific template first.
+            var actualkey = templatekey;
+            if (config.moduletype && (templatekey === 'activity_name' || templatekey === 'activity_intro')) {
+                var modkey = config.moduletype + '_' + templatekey.replace('activity_', '');
+                if (config.templates[modkey]) {
+                    actualkey = modkey;
+                }
+            }
+            
+            var template = config.templates[actualkey];
             if (!template) return '';
             if (template.indexOf('{mlang') !== -1) return template;
             
@@ -520,38 +712,40 @@ function local_mlangdefaults_before_footer($hook = null) {
         }
         
         function injectDefaults() {
-            console.log('MLANGDEFAULTS: Starting injection');
             var mappings = config.mappings || [];
             var currentUrl = window.location.href;
             
+            // Detect module type from URL if not in config (for modedit pages).
+            if (!config.moduletype && currentUrl.indexOf('/course/modedit.php') !== -1) {
+                var urlParams = new URLSearchParams(window.location.search);
+                var addParam = urlParams.get('add');
+                if (addParam) {
+                    config.moduletype = addParam;
+                }
+            }
+            
             if (config.creationonly && !isCreationPage(currentUrl)) {
-                console.log('MLANGDEFAULTS: Not a creation page, skipping');
                 return;
             }
             
             for (var i = 0; i < mappings.length; i++) {
                 var mapping = mappings[i];
-                console.log('MLANGDEFAULTS: Processing mapping:', mapping.fieldselector);
                 
                 var field = document.getElementById(mapping.fieldselector);
                 if (!field) {
-                    console.log('MLANGDEFAULTS: Field not found:', mapping.fieldselector);
                     continue;
                 }
                 
                 if (field.value && field.value.trim() !== '') {
-                    console.log('MLANGDEFAULTS: Field already has value, skipping');
                     continue;
                 }
                 
                 if (config.skipifmlangpresent && field.value.indexOf('{mlang') !== -1) {
-                    console.log('MLANGDEFAULTS: Field already has {mlang}, skipping');
                     continue;
                 }
                 
                 var template = getTemplate(mapping.templatekey, config);
                 if (!template) {
-                    console.log('MLANGDEFAULTS: No template for:', mapping.templatekey);
                     continue;
                 }
                 
@@ -561,7 +755,6 @@ function local_mlangdefaults_before_footer($hook = null) {
                         var editor = M.editor[mapping.fieldselector];
                         if (editor && editor.getContent && editor.getContent() === '') {
                             editor.setContent(template);
-                            console.log('MLANGDEFAULTS: Injected into TinyMCE editor');
                         }
                     } else {
                         // Fallback to textarea
@@ -569,14 +762,12 @@ function local_mlangdefaults_before_footer($hook = null) {
                         if (field.dispatchEvent) {
                             field.dispatchEvent(new Event('change', {bubbles: true}));
                         }
-                        console.log('MLANGDEFAULTS: Injected into textarea');
                     }
                 } else {
                     field.value = template;
                     if (field.dispatchEvent) {
                         field.dispatchEvent(new Event('change', {bubbles: true}));
                     }
-                    console.log('MLANGDEFAULTS: Injected into text field');
                 }
                 
                 if (config.showtoast && typeof M !== 'undefined' && M.util && M.util.add_notification) {

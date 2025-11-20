@@ -53,6 +53,16 @@ $string['template_activity_name'] = 'Activity name template';
 $string['template_activity_name_desc'] = 'Template for activity name field';
 $string['template_activity_intro'] = 'Activity intro template';
 $string['template_activity_intro_desc'] = 'Template for activity intro field';
+$string['template_assign_activityeditor'] = 'Assignment activity editor template';
+$string['template_assign_activityeditor_desc'] = 'Template for assignment activity instructions field';
+
+// Module-specific templates.
+$string['module_templates'] = 'Module-specific templates';
+$string['module_templates_desc'] = 'Templates specific to each activity module type. If not set, the general activity templates above will be used.';
+$string['template_module_name'] = '{$a} name template';
+$string['template_module_name_desc'] = 'Template for {$a} name field (overrides general activity name template)';
+$string['template_module_intro'] = '{$a} intro template';
+$string['template_module_intro_desc'] = 'Template for {$a} intro field (overrides general activity intro template)';
 
 // Field mappings.
 $string['fieldmappings'] = 'Field Mappings';

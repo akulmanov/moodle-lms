@@ -26,26 +26,6 @@ function xmldb_local_mlangdefaults_install(): bool {
 
     $dbman = $DB->get_manager();
 
-    // Define table local_mlangdefaults_mappings.
-    $table = new xmldb_table('local_mlangdefaults_mappings');
-    $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
-    $table->add_field('pagepattern', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null);
-    $table->add_field('fieldselector', XMLDB_TYPE_CHAR, '255', null, XMLDB_NOTNULL, null, null);
-    $table->add_field('fieldtype', XMLDB_TYPE_CHAR, '50', null, XMLDB_NOTNULL, null, 'text');
-    $table->add_field('templatekey', XMLDB_TYPE_CHAR, '100', null, null, null, null);
-    $table->add_field('enabled', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '1');
-    $table->add_field('priority', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '100');
-    $table->add_field('builtin', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0');
-    $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
-    $table->add_field('timemodified', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
-    $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
-    $table->add_index('pagepattern', XMLDB_INDEX_NOTUNIQUE, ['pagepattern']);
-    $table->add_index('enabled', XMLDB_INDEX_NOTUNIQUE, ['enabled']);
-
-    if (!$dbman->table_exists($table)) {
-        $dbman->create_table($table);
-    }
-
     // Define table local_mlangdefaults_logs.
     $table = new xmldb_table('local_mlangdefaults_logs');
     $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
@@ -82,70 +62,6 @@ function xmldb_local_mlangdefaults_install(): bool {
 
     if (!$dbman->table_exists($table)) {
         $dbman->create_table($table);
-    }
-
-    // Insert built-in mappings.
-    $mappings = [
-        [
-            'pagepattern' => '/course/edit\.php',
-            'fieldselector' => 'id_fullname',
-            'fieldtype' => 'text',
-            'templatekey' => 'course_fullname',
-            'enabled' => 1,
-            'priority' => 100,
-            'builtin' => 1,
-        ],
-        [
-            'pagepattern' => '/course/edit\.php',
-            'fieldselector' => 'id_summary_editor',
-            'fieldtype' => 'editor',
-            'templatekey' => 'course_summary',
-            'enabled' => 1,
-            'priority' => 100,
-            'builtin' => 1,
-        ],
-        [
-            'pagepattern' => '/course/editsection\.php',
-            'fieldselector' => 'id_name',
-            'fieldtype' => 'text',
-            'templatekey' => 'section_name',
-            'enabled' => 1,
-            'priority' => 100,
-            'builtin' => 1,
-        ],
-        [
-            'pagepattern' => '/course/editsection\.php',
-            'fieldselector' => 'id_summary_editor',
-            'fieldtype' => 'editor',
-            'templatekey' => 'section_summary',
-            'enabled' => 1,
-            'priority' => 100,
-            'builtin' => 1,
-        ],
-        [
-            'pagepattern' => '/course/modedit\.php',
-            'fieldselector' => 'id_name',
-            'fieldtype' => 'text',
-            'templatekey' => 'activity_name',
-            'enabled' => 1,
-            'priority' => 100,
-            'builtin' => 1,
-        ],
-        [
-            'pagepattern' => '/course/modedit\.php',
-            'fieldselector' => 'id_introeditor',
-            'fieldtype' => 'editor',
-            'templatekey' => 'activity_intro',
-            'enabled' => 1,
-            'priority' => 100,
-            'builtin' => 1,
-        ],
-    ];
-
-    foreach ($mappings as $mapping) {
-        $mapping['timecreated'] = time();
-        $mapping['timemodified'] = time();
-        $DB->insert_record('local_mlangdefaults_mappings', (object)$mapping);
     }
 
     // Set default configuration.

@@ -28,17 +28,12 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
      * Initialize injection on page load.
      */
     function init() {
-        console.log('MLANGDEFAULTS: JavaScript init called');
-        
         // Get config from window.M.cfg or Config.
         const config = (typeof M !== 'undefined' && M.cfg && M.cfg.local_mlangdefaults) ?
             M.cfg.local_mlangdefaults : (Config.local_mlangdefaults || {});
 
-        console.log('MLANGDEFAULTS: Config:', config);
-
         // Check if plugin is enabled.
         if (!config || !config.enabled) {
-            console.log('MLANGDEFAULTS: Plugin disabled or no config');
             return;
         }
 
@@ -46,6 +41,15 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
         const currentUrl = window.location.href;
         if (config.creationonly && !isCreationPage(currentUrl)) {
             return;
+        }
+
+        // Detect module type from URL if not in config (for modedit pages).
+        if (!config.moduletype && currentUrl.indexOf('/course/modedit.php') !== -1) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const addParam = urlParams.get('add');
+            if (addParam) {
+                config.moduletype = addParam;
+            }
         }
 
         // Get mappings for this page.
@@ -56,10 +60,8 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
 
         // Wait for page to be ready.
         $(document).ready(function() {
-            console.log('MLANGDEFAULTS: Document ready, mappings:', mappings);
             // Longer delay to ensure editors (especially TinyMCE) are fully initialized.
             setTimeout(function() {
-                console.log('MLANGDEFAULTS: Starting injection');
                 injectDefaults(mappings, config);
             }, 1500);
         });
@@ -97,15 +99,11 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
      * @param {Object} config Configuration object
      */
     function injectDefaults(mappings, config) {
-        console.log('MLANGDEFAULTS: injectDefaults called with', mappings.length, 'mappings');
         mappings.forEach(function(mapping) {
-            console.log('MLANGDEFAULTS: Looking for field:', mapping.fieldselector);
             const field = document.getElementById(mapping.fieldselector);
             if (!field) {
-                console.log('MLANGDEFAULTS: Field not found:', mapping.fieldselector);
                 return;
             }
-            console.log('MLANGDEFAULTS: Field found:', mapping.fieldselector, 'value:', field.value);
 
             // Check if field is empty.
             if (field.value && field.value.trim() !== '') {
@@ -144,9 +142,23 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
             return '';
         }
 
-        const template = config.templates[templatekey];
+        // For activity_name and activity_intro, check for module-specific template first.
+        let actualkey = templatekey;
+        if (config.moduletype && (templatekey === 'activity_name' || templatekey === 'activity_intro')) {
+            const modkey = config.moduletype + '_' + templatekey.replace('activity_', '');
+            if (config.templates[modkey]) {
+                actualkey = modkey;
+            }
+        }
+
+        const template = config.templates[actualkey];
         if (!template) {
             return '';
+        }
+
+        // If template already has {mlang} tags, return as-is.
+        if (template.indexOf('{mlang') !== -1) {
+            return template;
         }
 
         // Build {mlang} structure.
@@ -205,7 +217,6 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
 
         const textarea = document.getElementById(fieldselector);
         if (!textarea) {
-            console.log('MLANGDEFAULTS: Textarea not found:', fieldselector);
             return;
         }
 
@@ -226,7 +237,6 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
                     const currentContent = editor.getContent();
                     if (!currentContent || currentContent.trim() === '') {
                         editor.setContent(template);
-                        console.log('MLANGDEFAULTS: Injected into TinyMCE editor:', elementId);
                         if (config.showtoast) {
                             showToast(config);
                         }
@@ -235,7 +245,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
                     }
                 }
             } catch (e) {
-                console.log('MLANGDEFAULTS: TinyMCE access error:', e);
+                // Silently handle TinyMCE access errors.
             }
             return false;
         }
@@ -253,7 +263,6 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
                     const currentValue = editor.get('value');
                     if (!currentValue || currentValue.trim() === '') {
                         editor.set('value', template);
-                        console.log('MLANGDEFAULTS: Injected into Atto editor:', elementId);
                         if (config.showtoast) {
                             showToast(config);
                         }
@@ -262,7 +271,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
                     }
                 }
             } catch (e) {
-                console.log('MLANGDEFAULTS: Atto access error:', e);
+                // Silently handle Atto access errors.
             }
             return false;
         }
@@ -292,7 +301,6 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
                 setTimeout(function() {
                     tryInjectTinyMCE();
                 }, 100);
-                console.log('MLANGDEFAULTS: Injected into textarea (fallback):', fieldselector);
                 if (config.showtoast) {
                     showToast(config);
                 }

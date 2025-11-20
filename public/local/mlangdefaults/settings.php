@@ -22,27 +22,17 @@ if ($hassiteconfig) {
     $settings = new admin_settingpage('local_mlangdefaults', get_string('pluginname', 'local_mlangdefaults'));
     $ADMIN->add('localplugins', $settings);
 
-    // Define external pages (required for the pages to work) but hide them from menu.
-    $mappingspage = new admin_externalpage('local_mlangdefaults_mappings',
-        get_string('fieldmappings', 'local_mlangdefaults'),
-        new moodle_url('/local/mlangdefaults/mappings.php'),
-        'local/mlangdefaults:manage',
-        true); // Hidden from menu but still accessible.
-    $ADMIN->add('localplugins', $mappingspage);
-    
+    // Define diagnostics page (hidden from menu but still accessible).
     $diagnosticspage = new admin_externalpage('local_mlangdefaults_diagnostics',
         get_string('diagnostics', 'local_mlangdefaults'),
         new moodle_url('/local/mlangdefaults/diagnostics.php'),
         'local/mlangdefaults:viewdiagnostics',
-        true); // Hidden from menu but still accessible.
+        true);
     $ADMIN->add('localplugins', $diagnosticspage);
 
-    // Links to additional pages inside the settings page.
-    $mappingsurl = new moodle_url('/local/mlangdefaults/mappings.php');
+    // Link to diagnostics page inside the settings page.
     $diagnosticsurl = new moodle_url('/local/mlangdefaults/diagnostics.php');
-    $linkshtml = '<a href="' . $mappingsurl->out() . '" class="btn btn-secondary">' . 
-                 get_string('fieldmappings', 'local_mlangdefaults') . '</a> ' .
-                 '<a href="' . $diagnosticsurl->out() . '" class="btn btn-secondary">' . 
+    $linkshtml = '<a href="' . $diagnosticsurl->out() . '" class="btn btn-secondary">' . 
                  get_string('diagnostics', 'local_mlangdefaults') . '</a>';
     $settings->add(new admin_setting_description('local_mlangdefaults/links',
         '',
@@ -103,5 +93,45 @@ if ($hassiteconfig) {
     $settings->add(new admin_setting_configtextarea('local_mlangdefaults/template_activity_intro',
         get_string('template_activity_intro', 'local_mlangdefaults'),
         get_string('template_activity_intro_desc', 'local_mlangdefaults'), 'Activity description', PARAM_TEXT));
+
+    // Module-specific templates.
+    $settings->add(new admin_setting_heading('local_mlangdefaults/module_templates',
+        get_string('module_templates', 'local_mlangdefaults'),
+        get_string('module_templates_desc', 'local_mlangdefaults')));
+
+    // Get all installed activity modules.
+    $modules = local_mlangdefaults_get_installed_modules();
+    foreach ($modules as $modname => $moddisplayname) {
+        // Add heading for each module section.
+        $settings->add(new admin_setting_heading('local_mlangdefaults/module_' . $modname,
+            $moddisplayname,
+            ''));
+
+        // Module name template.
+        $settings->add(new admin_setting_configtextarea(
+            'local_mlangdefaults/template_' . $modname . '_name',
+            get_string('template_module_name', 'local_mlangdefaults', $moddisplayname),
+            get_string('template_module_name_desc', 'local_mlangdefaults', $moddisplayname),
+            '',
+            PARAM_TEXT));
+
+        // Module intro template.
+        $settings->add(new admin_setting_configtextarea(
+            'local_mlangdefaults/template_' . $modname . '_intro',
+            get_string('template_module_intro', 'local_mlangdefaults', $moddisplayname),
+            get_string('template_module_intro_desc', 'local_mlangdefaults', $moddisplayname),
+            '',
+            PARAM_TEXT));
+
+        // Assignment-specific activity editor field.
+        if ($modname === 'assign') {
+            $settings->add(new admin_setting_configtextarea(
+                'local_mlangdefaults/template_assign_activityeditor',
+                get_string('template_assign_activityeditor', 'local_mlangdefaults'),
+                get_string('template_assign_activityeditor_desc', 'local_mlangdefaults'),
+                'Activity instructions',
+                PARAM_TEXT));
+        }
+    }
 }
 
