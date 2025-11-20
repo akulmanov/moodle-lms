@@ -43,6 +43,24 @@ function local_mlangdefaults_get_installed_modules() {
 }
 
 /**
+ * Get all installed question types.
+ *
+ * @return array Array of question type name => display name
+ */
+function local_mlangdefaults_get_installed_question_types() {
+    require_once(__DIR__ . '/../../question/engine/bank.php');
+    
+    $qtypes = question_bank::get_creatable_qtypes();
+    $result = [];
+    
+    foreach ($qtypes as $qtypename => $qtype) {
+        $result[$qtypename] = $qtype->local_name();
+    }
+    
+    return $result;
+}
+
+/**
  * Generate multi-language template from language list and template key.
  *
  * @param string $templatekey Template key (e.g., 'course_fullname')
@@ -132,6 +150,25 @@ function local_mlangdefaults_resolve_template($templatekey, $context = []) {
         }
     }
 
+    // Check question type-specific template (e.g., template_multichoice_name, template_essay_questiontext).
+    if (!empty($context['questiontype'])) {
+        // For question_name, question_questiontext, question_generalfeedback, check question type-specific first.
+        if ($templatekey === 'question_name' || $templatekey === 'question_questiontext' || $templatekey === 'question_generalfeedback') {
+            $fieldname = str_replace('question_', '', $templatekey);
+            $qtypetemplate = get_config('local_mlangdefaults', 'template_' . $context['questiontype'] . '_' . $fieldname);
+            if (!empty($qtypetemplate)) {
+                return $qtypetemplate;
+            }
+        }
+        // For question type-specific template keys (e.g., multichoice_name).
+        if (strpos($templatekey, $context['questiontype']) === 0) {
+            $qtypetemplate = get_config('local_mlangdefaults', 'template_' . $templatekey);
+            if (!empty($qtypetemplate)) {
+                return $qtypetemplate;
+            }
+        }
+    }
+
     // Use global template.
     $globaltemplate = get_config('local_mlangdefaults', 'template_' . $templatekey);
     return $globaltemplate ?: '';
@@ -153,6 +190,9 @@ function local_mlangdefaults_get_default_template($templatekey) {
         'activity_intro' => 'Activity description',
         'assign_activityeditor' => 'Activity instructions',
         'page_content' => 'Page content',
+        'question_name' => 'Question name',
+        'question_questiontext' => 'Question text',
+        'question_generalfeedback' => 'General feedback',
     ];
 
     return $defaults[$templatekey] ?? '';
@@ -343,6 +383,24 @@ function local_mlangdefaults_get_all_hardcoded_mappings() {
                 'fieldselector' => 'id_page',
                 'fieldtype' => 'editor',
                 'templatekey' => 'page_content',
+            ],
+        ],
+        // Question bank edit page - all question types have name, questiontext, and generalfeedback.
+        '/question/bank/editquestion/question\.php' => [
+            [
+                'fieldselector' => 'id_name',
+                'fieldtype' => 'text',
+                'templatekey' => 'question_name',
+            ],
+            [
+                'fieldselector' => 'id_questiontext',
+                'fieldtype' => 'editor',
+                'templatekey' => 'question_questiontext',
+            ],
+            [
+                'fieldselector' => 'id_generalfeedback',
+                'fieldtype' => 'editor',
+                'templatekey' => 'question_generalfeedback',
             ],
         ],
     ];
@@ -707,6 +765,33 @@ function local_mlangdefaults_before_footer($hook = null) {
             }
         }
     }
+    // Handle question bank edit page.
+    else if (strpos($url, '/question/bank/editquestion/question.php') !== false) {
+        $urlpattern = '/question/bank/editquestion/question.php';
+        // Extract question type from URL (qtype=multichoice, qtype=essay, etc.).
+        $qtype = optional_param('qtype', '', PARAM_COMPONENT);
+        if (empty($qtype)) {
+            // Try to get from question id.
+            $id = optional_param('id', 0, PARAM_INT);
+            if ($id > 0) {
+                global $DB;
+                $question = $DB->get_record('question', ['id' => $id]);
+                if ($question) {
+                    $qtype = $question->qtype;
+                }
+            }
+        }
+        if ($qtype) {
+            $context['questiontype'] = $qtype;
+        }
+        $id = optional_param('id', 0, PARAM_INT);
+        if ($id > 0) {
+            $creationonly = get_config('local_mlangdefaults', 'creationonly');
+            if ($creationonly) {
+                return;
+            }
+        }
+    }
     else {
         return;
     }
@@ -732,6 +817,9 @@ function local_mlangdefaults_before_footer($hook = null) {
         }
         $mappings = $filteredmappings;
     }
+    
+    // For question pages, all mappings are standard (name, questiontext, generalfeedback).
+    // Question type-specific templates can be added later if needed.
     
     // Prepare JavaScript configuration
     $jsconfig = [
@@ -773,12 +861,36 @@ function local_mlangdefaults_before_footer($hook = null) {
         $templatekeys[] = $modintrokey;
     }
     
+    // For question pages, also load question type-specific templates.
+    if (!empty($context['questiontype'])) {
+        // Add question type-specific name, questiontext, and generalfeedback templates.
+        $qtypenamekey = $context['questiontype'] . '_name';
+        $qtypequestiontextkey = $context['questiontype'] . '_questiontext';
+        $qtypegeneralfeedbackkey = $context['questiontype'] . '_generalfeedback';
+        $templatekeys[] = $qtypenamekey;
+        $templatekeys[] = $qtypequestiontextkey;
+        $templatekeys[] = $qtypegeneralfeedbackkey;
+    }
+    
+    // Pass question type to JavaScript for dynamic template resolution.
+    if (!empty($context['questiontype'])) {
+        $jsconfig['questiontype'] = $context['questiontype'];
+    }
+    
     foreach ($templatekeys as $key) {
         // Resolve template - for module-specific keys, the resolve function will check module-specific config.
         $resolvkey = $key;
         if (!empty($context['moduletype']) && ($key === $context['moduletype'] . '_name' || $key === $context['moduletype'] . '_intro')) {
             // Map to activity_name or activity_intro for resolution (resolve function checks module-specific).
             $resolvkey = str_replace($context['moduletype'] . '_', 'activity_', $key);
+        }
+        // For question type-specific keys, map to question_* for resolution.
+        if (!empty($context['questiontype']) && 
+            ($key === $context['questiontype'] . '_name' || 
+             $key === $context['questiontype'] . '_questiontext' || 
+             $key === $context['questiontype'] . '_generalfeedback')) {
+            // Map to question_name, question_questiontext, or question_generalfeedback for resolution.
+            $resolvkey = str_replace($context['questiontype'] . '_', 'question_', $key);
         }
         $template = local_mlangdefaults_resolve_template($resolvkey, $context);
         if (empty($template)) {
@@ -915,6 +1027,15 @@ function local_mlangdefaults_before_footer($hook = null) {
                 var addParam = urlParams.get('add');
                 if (addParam) {
                     config.moduletype = addParam;
+                }
+            }
+            
+            // Detect question type from URL if not in config
+            if (!config.questiontype && currentUrl.indexOf('/question/bank/editquestion/question.php') !== -1) {
+                var urlParams = new URLSearchParams(window.location.search);
+                var qtypeParam = urlParams.get('qtype');
+                if (qtypeParam) {
+                    config.questiontype = qtypeParam;
                 }
             }
             

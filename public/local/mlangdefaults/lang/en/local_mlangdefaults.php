@@ -57,6 +57,12 @@ $string['template_assign_activityeditor'] = 'Assignment activity editor template
 $string['template_assign_activityeditor_desc'] = 'Template for assignment activity instructions field';
 $string['template_page_content'] = 'Page content template';
 $string['template_page_content_desc'] = 'Template for page content field';
+$string['template_question_name'] = 'Question name template';
+$string['template_question_name_desc'] = 'Template for question name field';
+$string['template_question_questiontext'] = 'Question text template';
+$string['template_question_questiontext_desc'] = 'Template for question text field';
+$string['template_question_generalfeedback'] = 'Question general feedback template';
+$string['template_question_generalfeedback_desc'] = 'Template for question general feedback field';
 
 // Module-specific templates.
 $string['module_templates'] = 'Module-specific templates';
@@ -65,6 +71,16 @@ $string['template_module_name'] = '{$a} name template';
 $string['template_module_name_desc'] = 'Template for {$a} name field (overrides general activity name template)';
 $string['template_module_intro'] = '{$a} intro template';
 $string['template_module_intro_desc'] = 'Template for {$a} intro field (overrides general activity intro template)';
+
+// Question type-specific templates.
+$string['question_templates'] = 'Question templates';
+$string['question_templates_desc'] = 'Templates for question bank. If not set, the general question templates above will be used.';
+$string['template_questiontype_name'] = '{$a} name template';
+$string['template_questiontype_name_desc'] = 'Template for {$a} question name field (overrides general question name template)';
+$string['template_questiontype_questiontext'] = '{$a} question text template';
+$string['template_questiontype_questiontext_desc'] = 'Template for {$a} question text field (overrides general question text template)';
+$string['template_questiontype_generalfeedback'] = '{$a} general feedback template';
+$string['template_questiontype_generalfeedback_desc'] = 'Template for {$a} general feedback field (overrides general feedback template)';
 
 // Field mappings.
 $string['fieldmappings'] = 'Field Mappings';
