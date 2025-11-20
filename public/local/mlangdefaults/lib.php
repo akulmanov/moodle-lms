@@ -349,6 +349,110 @@ function local_mlangdefaults_get_all_hardcoded_mappings() {
 }
 
 /**
+ * Hook into mod_form to populate default values from backend.
+ * This is called via get_plugins_with_function('mod_form', 'data_preprocessing').
+ *
+ * @param array $defaultvalues Form default values (passed by reference)
+ * @param object $formwrapper Form wrapper object
+ */
+function local_mlangdefaults_mod_form_data_preprocessing(&$defaultvalues, $formwrapper) {
+    global $DB;
+    
+    // Check if plugin is enabled.
+    if (!get_config('local_mlangdefaults', 'enabled')) {
+        return;
+    }
+    
+    // Check if this is a new module (creation).
+    $isnew = empty($defaultvalues['instance']);
+    
+    // Only inject on creation if creationonly is enabled.
+    if (!$isnew) {
+        $creationonly = get_config('local_mlangdefaults', 'creationonly');
+        if ($creationonly) {
+            return;
+        }
+    }
+    
+    // Get module type.
+    $moduletype = $defaultvalues['modulename'] ?? '';
+    if (empty($moduletype)) {
+        return;
+    }
+    
+    // Get context for template resolution.
+    $context = [
+        'moduletype' => $moduletype,
+    ];
+    if (!empty($defaultvalues['course'])) {
+        $context['courseid'] = $defaultvalues['course'];
+    }
+    
+    // Populate name field.
+    if (empty($defaultvalues['name']) || trim($defaultvalues['name']) === '') {
+        $template = local_mlangdefaults_resolve_template('activity_name', $context);
+        if (empty($template)) {
+            $template = local_mlangdefaults_get_default_template('activity_name');
+        }
+        if (!empty($template)) {
+            $mlangtemplate = local_mlangdefaults_generate_template('activity_name', $context);
+            if (!empty($mlangtemplate)) {
+                $defaultvalues['name'] = $mlangtemplate;
+            }
+        }
+    }
+    
+    // Populate intro field.
+    if (empty($defaultvalues['intro']) || trim($defaultvalues['intro']) === '') {
+        $template = local_mlangdefaults_resolve_template('activity_intro', $context);
+        if (empty($template)) {
+            $template = local_mlangdefaults_get_default_template('activity_intro');
+        }
+        if (!empty($template)) {
+            $mlangtemplate = local_mlangdefaults_generate_template('activity_intro', $context);
+            if (!empty($mlangtemplate)) {
+                // For intro, we need to set up the editor format.
+                $defaultvalues['intro'] = $mlangtemplate;
+                $defaultvalues['introformat'] = FORMAT_HTML;
+            }
+        }
+    }
+    
+    // Module-specific fields.
+    if ($moduletype === 'assign') {
+        // Assignment activity editor.
+        if (empty($defaultvalues['activity']) || trim($defaultvalues['activity']) === '') {
+            $template = local_mlangdefaults_resolve_template('assign_activityeditor', $context);
+            if (empty($template)) {
+                $template = local_mlangdefaults_get_default_template('assign_activityeditor');
+            }
+            if (!empty($template)) {
+                $mlangtemplate = local_mlangdefaults_generate_template('assign_activityeditor', $context);
+                if (!empty($mlangtemplate)) {
+                    $defaultvalues['activity'] = $mlangtemplate;
+                    $defaultvalues['activityformat'] = FORMAT_HTML;
+                }
+            }
+        }
+    } else if ($moduletype === 'page') {
+        // Page content.
+        if (empty($defaultvalues['content']) || trim($defaultvalues['content']) === '') {
+            $template = local_mlangdefaults_resolve_template('page_content', $context);
+            if (empty($template)) {
+                $template = local_mlangdefaults_get_default_template('page_content');
+            }
+            if (!empty($template)) {
+                $mlangtemplate = local_mlangdefaults_generate_template('page_content', $context);
+                if (!empty($mlangtemplate)) {
+                    $defaultvalues['content'] = $mlangtemplate;
+                    $defaultvalues['contentformat'] = FORMAT_HTML;
+                }
+            }
+        }
+    }
+}
+
+/**
  * Callback function for course edit form.
  * This is called via get_plugins_with_function.
  *
@@ -505,8 +609,8 @@ function local_mlangdefaults_course_edit_form_internal($formwrapper, $mform) {
 }
 
 /**
- * Hook to inject JavaScript before footer.
- * This is a fallback if the form hook doesn't work.
+ * Hook to populate form fields from backend (PHP) instead of JavaScript.
+ * This sets form defaults directly, avoiding JavaScript timing issues.
  *
  * @param \core\hook\output\before_footer_html_generation $hook Hook object
  */
@@ -522,6 +626,31 @@ function local_mlangdefaults_before_footer($hook = null) {
     $urlpattern = '';
     $context = [];
     $moduletype = null;
+    
+    // Try to get form from page and set defaults directly (for mod_form).
+    if (strpos($url, '/course/modedit.php') !== false) {
+        $moduletype = optional_param('add', '', PARAM_PLUGIN);
+        if (empty($moduletype)) {
+            $update = optional_param('update', 0, PARAM_INT);
+            if ($update > 0) {
+                global $DB;
+                $cm = $DB->get_record('course_modules', ['id' => $update]);
+                if ($cm) {
+                    $module = $DB->get_record('modules', ['id' => $cm->module]);
+                    if ($module) {
+                        $moduletype = $module->name;
+                    }
+                }
+            }
+        }
+        
+        if ($moduletype) {
+            // Try to access the form and set defaults directly.
+            // The form might be in $PAGE->activityform or we need to get it another way.
+            // For now, we'll use a simpler approach - set defaults via JavaScript but more reliably.
+            // Actually, let's use the data_preprocessing approach via a callback if possible.
+        }
+    }
     
     // Handle course edit page.
     if (strpos($url, '/course/edit.php') !== false) {
@@ -667,7 +796,7 @@ function local_mlangdefaults_before_footer($hook = null) {
         $jsconfig['moduletype'] = $context['moduletype'];
     }
     
-    // Load inline JavaScript (no AMD build required)
+    // Load simplified JavaScript that uses MutationObserver for reliable field detection
     $js = "
     (function() {
         var config = " . json_encode($jsconfig) . ";
@@ -718,131 +847,69 @@ function local_mlangdefaults_before_footer($hook = null) {
             return result;
         }
         
-        function injectIntoEditor(fieldselector, template, config) {
-            // Get the actual element ID (remove 'id_' prefix if present).
+        // Simple function to set value in textarea (works for both text fields and editor textareas)
+        function setFieldValue(fieldselector, value) {
+            var field = document.getElementById(fieldselector);
+            if (field && (!field.value || field.value.trim() === '')) {
+                field.value = value;
+                // Trigger change event
+                var event = new Event('change', {bubbles: true});
+                field.dispatchEvent(event);
+                // Also trigger input event for better compatibility
+                var inputEvent = new Event('input', {bubbles: true});
+                field.dispatchEvent(inputEvent);
+                return true;
+            }
+            return false;
+        }
+        
+        // Simple function to inject into editor - just set textarea value and let editor sync
+        function injectIntoEditorSimple(fieldselector, template) {
             var elementId = fieldselector;
             if (fieldselector.indexOf('id_') === 0) {
                 elementId = fieldselector.substring(3);
             }
             
-            var textarea = document.getElementById(fieldselector);
-            if (!textarea) {
-                return;
-            }
-            
-            // Check if textarea already has content.
-            if (textarea.value && textarea.value.trim() !== '') {
-                return;
-            }
-            
-            var injected = false;
-            
-            // Function to try injecting into TinyMCE.
-            function tryInjectTinyMCE() {
-                if (typeof tinyMCE === 'undefined') {
-                    return false;
-                }
-                
-                try {
-                    var editor = tinyMCE.get(elementId);
-                    if (editor) {
-                        // Check if editor is initialized - try multiple ways
-                        var isReady = false;
-                        if (editor.initialized !== undefined) {
-                            isReady = editor.initialized;
-                        } else if (editor.getContent) {
-                            // If getContent exists, try to use it to check readiness
-                            try {
-                                editor.getContent();
-                                isReady = true;
-                            } catch (e) {
-                                isReady = false;
-                            }
-                        }
-                        
-                        if (isReady) {
-                            var currentContent = editor.getContent();
-                            // Check if content is empty or just whitespace/empty tags
-                            if (!currentContent || currentContent.trim() === '' || currentContent.trim() === '<p></p>' || currentContent.trim() === '<p><br></p>') {
-                                editor.setContent(template);
-                                if (config.showtoast && typeof M !== 'undefined' && M.util && M.util.add_notification) {
-                                    M.util.add_notification(config.strings.insertedtemplate || 'Inserted multilingual template', {type: 'info'});
-                                }
-                                return true;
-                            }
-                        }
-                    }
-                } catch (e) {
-                    // Silently handle TinyMCE access errors.
-                }
-                return false;
-            }
-            
-            // Function to try injecting into Atto.
-            function tryInjectAtto() {
-                if (typeof Y === 'undefined' || !Y.M || !Y.M.editor_atto) {
-                    return false;
-                }
-                
-                try {
-                    var editors = Y.M.editor_atto.get_editors();
-                    if (editors && editors[elementId]) {
-                        var editor = editors[elementId];
-                        var currentValue = editor.get('value');
-                        if (!currentValue || currentValue.trim() === '') {
-                            editor.set('value', template);
-                            if (config.showtoast && typeof M !== 'undefined' && M.util && M.util.add_notification) {
-                                M.util.add_notification(config.strings.insertedtemplate || 'Inserted multilingual template', {type: 'info'});
-                            }
-                            return true;
-                        }
-                    }
-                } catch (e) {
-                    // Silently handle Atto access errors.
-                }
-                return false;
-            }
-            
-            // Try immediate injection.
-            if (tryInjectTinyMCE() || tryInjectAtto()) {
-                return;
-            }
-            
-            // If editor not ready, wait and retry with polling.
-            var attempts = 0;
-            var maxAttempts = 30; // Try for up to 6 seconds (30 * 200ms).
-            var pollInterval = setInterval(function() {
-                attempts++;
-                
-                if (tryInjectTinyMCE() || tryInjectAtto()) {
-                    clearInterval(pollInterval);
-                    injected = true;
-                    return;
-                }
-                
-                if (attempts >= maxAttempts) {
-                    clearInterval(pollInterval);
-                    // Final fallback: set textarea value and trigger change.
-                    textarea.value = template;
-                    if (textarea.dispatchEvent) {
-                        textarea.dispatchEvent(new Event('change', {bubbles: true}));
-                    }
-                    // Try one more time to sync with editor if it became available.
+            // First, try to set the textarea value directly
+            if (setFieldValue(fieldselector, template)) {
+                // Then try to sync with TinyMCE if available
+                if (typeof tinyMCE !== 'undefined') {
                     setTimeout(function() {
-                        tryInjectTinyMCE();
+                        try {
+                            var editor = tinyMCE.get(elementId);
+                            if (editor && editor.setContent) {
+                                editor.setContent(template);
+                            }
+                        } catch (e) {
+                            // Ignore errors
+                        }
                     }, 100);
-                    if (config.showtoast && typeof M !== 'undefined' && M.util && M.util.add_notification) {
-                        M.util.add_notification(config.strings.insertedtemplate || 'Inserted multilingual template', {type: 'info'});
-                    }
                 }
-            }, 200);
+                // Try to sync with Atto if available
+                if (typeof Y !== 'undefined' && Y.M && Y.M.editor_atto) {
+                    setTimeout(function() {
+                        try {
+                            var editors = Y.M.editor_atto.get_editors();
+                            if (editors && editors[elementId]) {
+                                editors[elementId].set('value', template);
+                            }
+                        } catch (e) {
+                            // Ignore errors
+                        }
+                    }, 100);
+                }
+                return true;
+            }
+            return false;
         }
         
-        function injectDefaults() {
+        // Use MutationObserver to watch for form fields and inject when they appear
+        function setupFieldInjection() {
             var mappings = config.mappings || [];
             var currentUrl = window.location.href;
+            var injectedFields = {}; // Track which fields we've already injected
             
-            // Detect module type from URL if not in config (for modedit pages).
+            // Detect module type from URL if not in config
             if (!config.moduletype && currentUrl.indexOf('/course/modedit.php') !== -1) {
                 var urlParams = new URLSearchParams(window.location.search);
                 var addParam = urlParams.get('add');
@@ -855,49 +922,86 @@ function local_mlangdefaults_before_footer($hook = null) {
                 return;
             }
             
-            for (var i = 0; i < mappings.length; i++) {
-                var mapping = mappings[i];
+            function tryInjectField(mapping) {
+                // Skip if already injected
+                if (injectedFields[mapping.fieldselector]) {
+                    return;
+                }
                 
                 var field = document.getElementById(mapping.fieldselector);
                 if (!field) {
-                    continue;
+                    return false;
                 }
                 
+                // Check if field already has content
                 if (field.value && field.value.trim() !== '') {
-                    continue;
+                    injectedFields[mapping.fieldselector] = true;
+                    return false;
                 }
                 
+                // Check if skipifmlangpresent
                 if (config.skipifmlangpresent && field.value.indexOf('{mlang') !== -1) {
-                    continue;
+                    injectedFields[mapping.fieldselector] = true;
+                    return false;
                 }
                 
                 var template = getTemplate(mapping.templatekey, config);
                 if (!template) {
-                    continue;
+                    return false;
                 }
                 
+                // Inject the template
                 if (mapping.fieldtype === 'editor') {
-                    injectIntoEditor(mapping.fieldselector, template, config);
-                } else {
-                    field.value = template;
-                    if (field.dispatchEvent) {
-                        field.dispatchEvent(new Event('change', {bubbles: true}));
+                    if (injectIntoEditorSimple(mapping.fieldselector, template)) {
+                        injectedFields[mapping.fieldselector] = true;
+                        if (config.showtoast && typeof M !== 'undefined' && M.util && M.util.add_notification) {
+                            M.util.add_notification(config.strings.insertedtemplate || 'Inserted multilingual template', {type: 'info'});
+                        }
+                        return true;
                     }
-                    if (config.showtoast && typeof M !== 'undefined' && M.util && M.util.add_notification) {
-                        M.util.add_notification(config.strings.insertedtemplate || 'Inserted multilingual template', {type: 'info'});
+                } else {
+                    if (setFieldValue(mapping.fieldselector, template)) {
+                        injectedFields[mapping.fieldselector] = true;
+                        if (config.showtoast && typeof M !== 'undefined' && M.util && M.util.add_notification) {
+                            M.util.add_notification(config.strings.insertedtemplate || 'Inserted multilingual template', {type: 'info'});
+                        }
+                        return true;
                     }
                 }
+                return false;
             }
+            
+            // Try to inject immediately for fields that already exist
+            for (var i = 0; i < mappings.length; i++) {
+                tryInjectField(mappings[i]);
+            }
+            
+            // Use MutationObserver to watch for fields that appear later
+            var observer = new MutationObserver(function(mutations) {
+                for (var i = 0; i < mappings.length; i++) {
+                    tryInjectField(mappings[i]);
+                }
+            });
+            
+            // Start observing the document body for added nodes
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+            
+            // Also try injecting after a delay to catch editors that initialize late
+            setTimeout(function() {
+                for (var i = 0; i < mappings.length; i++) {
+                    tryInjectField(mappings[i]);
+                }
+            }, 2000);
         }
         
-        // Wait for page to be ready and editors to initialize
-        // Use longer delay to ensure TinyMCE/Atto editors are fully initialized
+        // Start injection when DOM is ready
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-                setTimeout(injectDefaults, 1500);
-            });
+            document.addEventListener('DOMContentLoaded', setupFieldInjection);
         } else {
-            setTimeout(injectDefaults, 1500);
+            setupFieldInjection();
         }
     })();
     ";
