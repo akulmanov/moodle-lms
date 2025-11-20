@@ -21,17 +21,32 @@ require_once(__DIR__ . '/lib.php');
 if ($hassiteconfig) {
     $settings = new admin_settingpage('local_mlangdefaults', get_string('pluginname', 'local_mlangdefaults'));
     $ADMIN->add('localplugins', $settings);
-    
-    // Add external pages for mappings and diagnostics.
-    $ADMIN->add('localplugins', new admin_externalpage('local_mlangdefaults_mappings',
+
+    // Define external pages (required for the pages to work) but hide them from menu.
+    $mappingspage = new admin_externalpage('local_mlangdefaults_mappings',
         get_string('fieldmappings', 'local_mlangdefaults'),
         new moodle_url('/local/mlangdefaults/mappings.php'),
-        'local/mlangdefaults:manage'));
+        'local/mlangdefaults:manage',
+        true); // Hidden from menu but still accessible.
+    $ADMIN->add('localplugins', $mappingspage);
     
-    $ADMIN->add('localplugins', new admin_externalpage('local_mlangdefaults_diagnostics',
+    $diagnosticspage = new admin_externalpage('local_mlangdefaults_diagnostics',
         get_string('diagnostics', 'local_mlangdefaults'),
         new moodle_url('/local/mlangdefaults/diagnostics.php'),
-        'local/mlangdefaults:viewdiagnostics'));
+        'local/mlangdefaults:viewdiagnostics',
+        true); // Hidden from menu but still accessible.
+    $ADMIN->add('localplugins', $diagnosticspage);
+
+    // Links to additional pages inside the settings page.
+    $mappingsurl = new moodle_url('/local/mlangdefaults/mappings.php');
+    $diagnosticsurl = new moodle_url('/local/mlangdefaults/diagnostics.php');
+    $linkshtml = '<a href="' . $mappingsurl->out() . '" class="btn btn-secondary">' . 
+                 get_string('fieldmappings', 'local_mlangdefaults') . '</a> ' .
+                 '<a href="' . $diagnosticsurl->out() . '" class="btn btn-secondary">' . 
+                 get_string('diagnostics', 'local_mlangdefaults') . '</a>';
+    $settings->add(new admin_setting_description('local_mlangdefaults/links',
+        '',
+        $linkshtml));
 
     // General settings.
     $settings->add(new admin_setting_heading('local_mlangdefaults/general',
@@ -88,8 +103,5 @@ if ($hassiteconfig) {
     $settings->add(new admin_setting_configtextarea('local_mlangdefaults/template_activity_intro',
         get_string('template_activity_intro', 'local_mlangdefaults'),
         get_string('template_activity_intro_desc', 'local_mlangdefaults'), 'Activity description', PARAM_TEXT));
-
-    // Note: Field mappings and diagnostics are available as separate admin pages
-    // They appear in the admin menu under Local plugins > Multi-language Defaults
 }
 
