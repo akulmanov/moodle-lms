@@ -57,11 +57,11 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
         // Wait for page to be ready.
         $(document).ready(function() {
             console.log('MLANGDEFAULTS: Document ready, mappings:', mappings);
-            // Small delay to ensure editors are initialized.
+            // Longer delay to ensure editors (especially TinyMCE) are fully initialized.
             setTimeout(function() {
                 console.log('MLANGDEFAULTS: Starting injection');
                 injectDefaults(mappings, config);
-            }, 500);
+            }, 1500);
         });
     }
 
@@ -197,42 +197,108 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/config'], function($, 
      * @param {Object} config Configuration object
      */
     function injectIntoEditor(fieldselector, template, config) {
-        // Try TinyMCE first.
-        if (typeof M !== 'undefined' && M.editor && M.editor[fieldselector]) {
-            const editor = M.editor[fieldselector];
-            if (editor && editor.getContent && editor.getContent() === '') {
-                editor.setContent(template);
-                if (config.showtoast) {
-                    showToast(config);
-                }
-                logInjection(fieldselector, template);
-                return;
-            }
+        // Get the actual element ID (remove 'id_' prefix if present).
+        let elementId = fieldselector;
+        if (fieldselector.startsWith('id_')) {
+            elementId = fieldselector.substring(3);
         }
 
-        // Try Atto.
-        if (typeof Y !== 'undefined' && Y.M.editor_atto) {
-            const editor = Y.M.editor_atto.get_editors()[fieldselector];
-            if (editor && editor.get('value') === '') {
-                editor.set('value', template);
-                if (config.showtoast) {
-                    showToast(config);
-                }
-                logInjection(fieldselector, template);
-                return;
-            }
-        }
-
-        // Fallback to hidden textarea.
         const textarea = document.getElementById(fieldselector);
-        if (textarea && (!textarea.value || textarea.value.trim() === '')) {
-            textarea.value = template;
-            $(textarea).trigger('change');
-            if (config.showtoast) {
-                showToast(config);
-            }
-            logInjection(fieldselector, template);
+        if (!textarea) {
+            console.log('MLANGDEFAULTS: Textarea not found:', fieldselector);
+            return;
         }
+
+        // Check if textarea already has content.
+        if (textarea.value && textarea.value.trim() !== '') {
+            return;
+        }
+
+        // Function to try injecting into TinyMCE.
+        function tryInjectTinyMCE() {
+            if (typeof tinyMCE === 'undefined') {
+                return false;
+            }
+
+            try {
+                const editor = tinyMCE.get(elementId);
+                if (editor && editor.initialized) {
+                    const currentContent = editor.getContent();
+                    if (!currentContent || currentContent.trim() === '') {
+                        editor.setContent(template);
+                        console.log('MLANGDEFAULTS: Injected into TinyMCE editor:', elementId);
+                        if (config.showtoast) {
+                            showToast(config);
+                        }
+                        logInjection(fieldselector, template);
+                        return true;
+                    }
+                }
+            } catch (e) {
+                console.log('MLANGDEFAULTS: TinyMCE access error:', e);
+            }
+            return false;
+        }
+
+        // Function to try injecting into Atto.
+        function tryInjectAtto() {
+            if (typeof Y === 'undefined' || !Y.M || !Y.M.editor_atto) {
+                return false;
+            }
+
+            try {
+                const editors = Y.M.editor_atto.get_editors();
+                if (editors && editors[elementId]) {
+                    const editor = editors[elementId];
+                    const currentValue = editor.get('value');
+                    if (!currentValue || currentValue.trim() === '') {
+                        editor.set('value', template);
+                        console.log('MLANGDEFAULTS: Injected into Atto editor:', elementId);
+                        if (config.showtoast) {
+                            showToast(config);
+                        }
+                        logInjection(fieldselector, template);
+                        return true;
+                    }
+                }
+            } catch (e) {
+                console.log('MLANGDEFAULTS: Atto access error:', e);
+            }
+            return false;
+        }
+
+        // Try immediate injection.
+        if (tryInjectTinyMCE() || tryInjectAtto()) {
+            return;
+        }
+
+        // If editor not ready, wait and retry with polling.
+        let attempts = 0;
+        const maxAttempts = 20; // Try for up to 4 seconds (20 * 200ms).
+        const pollInterval = setInterval(function() {
+            attempts++;
+            
+            if (tryInjectTinyMCE() || tryInjectAtto()) {
+                clearInterval(pollInterval);
+                return;
+            }
+
+            if (attempts >= maxAttempts) {
+                clearInterval(pollInterval);
+                // Final fallback: set textarea value and trigger change.
+                textarea.value = template;
+                $(textarea).trigger('change');
+                // Try one more time to sync with editor if it became available.
+                setTimeout(function() {
+                    tryInjectTinyMCE();
+                }, 100);
+                console.log('MLANGDEFAULTS: Injected into textarea (fallback):', fieldselector);
+                if (config.showtoast) {
+                    showToast(config);
+                }
+                logInjection(fieldselector, template);
+            }
+        }, 200);
     }
 
     /**
